@@ -44,11 +44,13 @@ int multiwatch_run(ShellTab *tab, const char *args) {
     
     pid_t pids[16];
     char paths[16][128];
-    
+    pid_t pgid = 0;   /* all watched commands share one process group (for Ctrl+C) */
+
     for (int i = 0; i < n; i++) {
         snprintf(paths[i], sizeof(paths[i]), "/tmp/.myterm_multiwatch_%d_%d.txt", (int)getpid(), i);
         pid_t pid = fork();
         if (pid == 0) {
+            setpgid(0, pgid);
             FILE *f = fopen(paths[i], "w");
             if (f) {
                 dup2(fileno(f), STDOUT_FILENO);
@@ -59,11 +61,17 @@ int multiwatch_run(ShellTab *tab, const char *args) {
             _exit(127);
         }
         pids[i] = pid;
+        if (pid < 0) continue;
+        if (pgid == 0) pgid = pid;
+        setpgid(pid, pgid);
+        pthread_mutex_lock(&tab->mutex);
+        tab->fg_pgid = pgid;
+        pthread_mutex_unlock(&tab->mutex);
     }
     
     for (int i = 0; i < n; i++) {
         int st;
-        waitpid(pids[i], &st, 0);
+        if (pids[i] > 0) waitpid(pids[i], &st, 0);
         FILE *f = fopen(paths[i], "r");
         if (f) {
             char line[1024];
@@ -78,6 +86,9 @@ int multiwatch_run(ShellTab *tab, const char *args) {
         }
         unlink(paths[i]);
     }
-    
+    pthread_mutex_lock(&tab->mutex);
+    tab->fg_pgid = 0;
+    pthread_mutex_unlock(&tab->mutex);
+
     return 0;
 }

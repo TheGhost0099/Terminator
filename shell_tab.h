@@ -2,6 +2,7 @@
 #define SHELL_TAB_H
 #include <pthread.h>
 #include <stddef.h>
+#include <sys/types.h>
 #define TAB_MAX 8
 #define INPUT_CAP 4096
 #define OUTPUT_CAP 65536
@@ -16,6 +17,7 @@ typedef struct ShellTab {
     int worker_started;
     int command_pending;
     int busy;
+    pid_t fg_pgid;      /* process group of the running command, 0 = nothing running */
     char command[INPUT_CAP];
     char cwd[4096];
     char output[OUTPUT_CAP];
@@ -40,4 +42,6 @@ int shell_tabs_switch(int index);
 ShellTab *shell_tab_get(int index);
 void shell_tab_append_output(ShellTab *tab, const char *text);
 int shell_tab_submit(ShellTab *tab, const char *command);
+int shell_tab_send_signal(ShellTab *tab, int sig);
+int shell_tabs_cleanup(void);
 #endif

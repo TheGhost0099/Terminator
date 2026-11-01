@@ -223,10 +223,10 @@ int gui_handle_event(XEvent *e) {
         if (t) {
             int r = line_editor_handle_key(t, &e->xkey);
             if (r == 2) {
-                int a = shell_tabs_active();
-                shell_tabs_close(a);
-                if (shell_tabs_count() == 0) return 0;
-                shell_tabs_switch(0);
+                /* Ctrl+D on an empty line: close this tab. The main loop's
+                   shell_tabs_cleanup() then switches to another open tab,
+                   or closes the window if this was the last one. */
+                shell_tabs_close(shell_tabs_active());
             }
             gui_redraw();
         }

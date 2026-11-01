@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
 
 static ShellTab tabs[TAB_MAX];
 static int count = 0, active = 0;
@@ -48,13 +49,35 @@ int shell_tabs_create(void) {
 
 void shell_tabs_close(int index) {
     if (index < 0 || index >= count) return;
+    /* Kill whatever is still running in this tab, otherwise the
+       worker thread would stay stuck waiting for it and join would hang. */
+    shell_tab_send_signal(&tabs[index], SIGKILL);
     tabs[index].alive = 0;
     pthread_mutex_lock(&tabs[index].mutex);
     pthread_cond_broadcast(&tabs[index].cond);
     pthread_mutex_unlock(&tabs[index].mutex);
     if (tabs[index].worker_started) {
         pthread_join(tabs[index].worker, NULL);
+        tabs[index].worker_started = 0;   /* never join the same thread twice */
     }
+}
+
+/* Called from the main loop. Finishes off tabs that died (via "exit" or
+   Ctrl+D), moves the view to a tab that is still open, and returns how
+   many tabs are still open (0 means the terminal window should close). */
+int shell_tabs_cleanup(void) {
+    int open = 0, first_open = -1;
+    for (int i = 0; i < count; i++) {
+        if (!tabs[i].alive && tabs[i].worker_started) {
+            shell_tabs_close(i);
+        }
+        if (tabs[i].alive) {
+            open++;
+            if (first_open < 0) first_open = i;
+        }
+    }
+    if (open > 0 && !tabs[active].alive) active = first_open;
+    return open;
 }
 
 void shell_tabs_shutdown(void) {
@@ -118,4 +141,18 @@ int shell_tab_submit(ShellTab *t, const char *cmd) {
     pthread_cond_signal(&t->cond);
     pthread_mutex_unlock(&t->mutex);
     return 0;
+}
+
+/* Send a signal (e.g. SIGINT for Ctrl+C) to the command running in this tab.
+   kill() with a negative pid sends it to the whole process group, so every
+   process of a pipeline like "cat | grep x" gets it.
+   Returns 1 if a command was running, 0 if nothing was running. */
+int shell_tab_send_signal(ShellTab *t, int sig) {
+    if (!t) return 0;
+    pthread_mutex_lock(&t->mutex);
+    pid_t pgid = t->fg_pgid;
+    pthread_mutex_unlock(&t->mutex);
+    if (pgid <= 0) return 0;
+    kill(-pgid, sig);
+    return 1;
 }

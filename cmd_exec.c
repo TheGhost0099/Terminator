@@ -114,7 +114,9 @@ static void output_error(ShellTab *t, const char *msg) {
 void cmd_exec_run(ShellTab *tab, const char *command) {
     while (isspace((unsigned char)*command)) command++;
     if (!*command) return;
-    if (strcmp(command, "exit") == 0) {
+    if (strncmp(command, "exit", 4) == 0 && (command[4] == '\0' || isspace((unsigned char)command[4]))) {
+        /* Mark the tab as finished; the main loop (shell_tabs_cleanup)
+           sees this, closes the tab, and quits when no tab is left. */
         tab->alive = 0;
         return;
     }
@@ -185,9 +187,13 @@ void cmd_exec_run(ShellTab *tab, const char *command) {
     }
     pid_t pids[MAX_CMDS];
     int spawned = 0;
+    pid_t pgid = 0;   /* all processes of this command share one process group */
     for (int i = 0; i < ncmd; i++) {
         pid_t pid = fork();
         if (pid == 0) {
+            /* Join the command's process group (the first child creates it),
+               so Ctrl+C can signal the whole pipeline at once. */
+            setpgid(0, pgid);
             if (i > 0) dup2(pipes[i - 1][0], STDIN_FILENO);
             if (i < ncmd - 1) dup2(pipes[i][1], STDOUT_FILENO);
             for (int j = 0; j < ncmd - 1; j++) {
@@ -231,6 +237,13 @@ void cmd_exec_run(ShellTab *tab, const char *command) {
             break;
         }
         pids[spawned++] = pid;
+        /* Parent does the same setpgid too, so the group surely exists
+           before a Ctrl+C can arrive. */
+        if (pgid == 0) pgid = pid;
+        setpgid(pid, pgid);
+        pthread_mutex_lock(&tab->mutex);
+        tab->fg_pgid = pgid;   /* remember it: this is what Ctrl+C will kill */
+        pthread_mutex_unlock(&tab->mutex);
     }
     for (int j = 0; j < ncmd - 1; j++) {
         close(pipes[j][0]);
@@ -248,6 +261,9 @@ void cmd_exec_run(ShellTab *tab, const char *command) {
         int status;
         while (waitpid(pids[i], &status, 0) < 0 && errno == EINTR) {}
     }
+    pthread_mutex_lock(&tab->mutex);
+    tab->fg_pgid = 0;   /* command finished: nothing left for Ctrl+C to kill */
+    pthread_mutex_unlock(&tab->mutex);
 }
 
 void cmd_exec_worker(ShellTab *tab) {

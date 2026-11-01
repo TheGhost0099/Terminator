@@ -27,6 +27,9 @@ int main(void)
                 break;
             }
         }
+        /* Close tabs that ended with "exit" or Ctrl+D; quit when none are left. */
+        if (shell_tabs_cleanup() == 0)
+            break;
         struct timespec ts = {0, 20000000};
         nanosleep(&ts, NULL);
         gui_redraw();

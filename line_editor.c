@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <signal.h>
 
 static void insert_char(ShellTab *t, char c) {
     if (t->input_len + 1 >= INPUT_CAP) return;
@@ -21,6 +22,9 @@ int line_editor_handle_key(ShellTab *t, XKeyEvent *event) {
     int n = XLookupString(event, buf, sizeof(buf), &k, NULL);
 
     if ((event->state & ControlMask) && (k == XK_c || k == XK_C)) {
+        /* Ctrl+C: interrupt the running command (if any) with SIGINT,
+           then show ^C and clear the half-typed line, like bash does. */
+        shell_tab_send_signal(t, SIGINT);
         shell_tab_append_output(t, "^C\n");
         t->input_len = t->cursor = 0;
         t->input[0] = '\0';
