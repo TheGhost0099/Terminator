@@ -1,4 +1,4 @@
-# MyTerm — X11 Custom Terminal
+# Terminator — X11 Custom Terminal
 
 A modular C/Xlib terminal project for the IIT Kharagpur Computing Lab assignment.
 
