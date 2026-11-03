@@ -1,6 +1,7 @@
 #include "shell_tab.h"
 #include "cmd_exec.h"
 #include "history.h"
+#include "jobs_control.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,6 +53,7 @@ void shell_tabs_close(int index) {
     /* Kill whatever is still running in this tab, otherwise the
        worker thread would stay stuck waiting for it and join would hang. */
     shell_tab_send_signal(&tabs[index], SIGKILL);
+    jobs_close_tab(&tabs[index]);   /* also kill its stopped/background jobs */
     tabs[index].alive = 0;
     pthread_mutex_lock(&tabs[index].mutex);
     pthread_cond_broadcast(&tabs[index].cond);

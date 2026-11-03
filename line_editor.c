@@ -2,6 +2,7 @@
 #include "shell_tab.h"
 #include "history.h"
 #include "autocomplete.h"
+#include "jobs_control.h"
 #include <X11/keysym.h>
 #include <X11/Xutil.h>
 #include <string.h>
@@ -28,6 +29,11 @@ int line_editor_handle_key(ShellTab *t, XKeyEvent *event) {
         shell_tab_append_output(t, "^C\n");
         t->input_len = t->cursor = 0;
         t->input[0] = '\0';
+        return 1;
+    }
+    if ((event->state & ControlMask) && (k == XK_z || k == XK_Z)) {
+        /* Ctrl+Z: stop (pause) the foreground command; "fg"/"bg" resume it. */
+        if (jobs_stop_foreground(t)) shell_tab_append_output(t, "^Z\n");
         return 1;
     }
     if ((event->state & ControlMask) && (k == XK_a || k == XK_A)) {

@@ -3,6 +3,7 @@
 #include "shell_tab.h"
 #include "history.h"
 #include "multiwatch.h"
+#include "jobs_control.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -162,10 +163,24 @@ void cmd_exec_run(ShellTab *tab, const char *command) {
         multiwatch_run(tab, command + 10);
         return;
     }
+    if (jobs_builtin(tab, command)) {   /* jobs, fg, bg */
+        return;
+    }
+
+    /* A trailing '&' means: run in the background (don't wait for it). */
+    char line[INPUT_CAP];
+    snprintf(line, sizeof(line), "%s", command);
+    size_t len = strlen(line);
+    while (len > 0 && isspace((unsigned char)line[len - 1])) line[--len] = '\0';
+    int background = 0;
+    if (len > 0 && line[len - 1] == '&') {
+        background = 1;
+        line[--len] = '\0';
+    }
 
     Parsed cmds[MAX_CMDS];
     int ncmd = 0;
-    if (parse(command, cmds, &ncmd) < 0) {
+    if (parse(line, cmds, &ncmd) < 0) {
         output_error(tab, "myterm: parse error (check quotes/operators)\n");
         return;
     }
@@ -241,26 +256,26 @@ void cmd_exec_run(ShellTab *tab, const char *command) {
            before a Ctrl+C can arrive. */
         if (pgid == 0) pgid = pid;
         setpgid(pid, pgid);
-        pthread_mutex_lock(&tab->mutex);
-        tab->fg_pgid = pgid;   /* remember it: this is what Ctrl+C will kill */
-        pthread_mutex_unlock(&tab->mutex);
+        if (!background) {
+            pthread_mutex_lock(&tab->mutex);
+            tab->fg_pgid = pgid;   /* remember it: this is what Ctrl+C will kill */
+            pthread_mutex_unlock(&tab->mutex);
+        }
     }
     for (int j = 0; j < ncmd - 1; j++) {
         close(pipes[j][0]);
         close(pipes[j][1]);
     }
     close(outpipe[1]);
-    char out[2048];
-    ssize_t nr;
-    while ((nr = read(outpipe[0], out, sizeof(out) - 1)) > 0) {
-        out[nr] = '\0';
-        shell_tab_append_output(tab, out);
+    if (spawned == 0) {
+        close(outpipe[0]);
+        return;
     }
-    close(outpipe[0]);
-    for (int i = 0; i < spawned; i++) {
-        int status;
-        while (waitpid(pids[i], &status, 0) < 0 && errno == EINTR) {}
-    }
+    /* Hand the processes to job control. It collects their output and
+       notices when they finish or get stopped (Ctrl+Z). For a normal
+       command we wait here; for "cmd &" we return to the prompt at once. */
+    int job = jobs_add(tab, pgid, pids, spawned, outpipe[0], line, background);
+    if (!background) jobs_wait_foreground(tab, job);
     pthread_mutex_lock(&tab->mutex);
     tab->fg_pgid = 0;   /* command finished: nothing left for Ctrl+C to kill */
     pthread_mutex_unlock(&tab->mutex);

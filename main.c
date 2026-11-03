@@ -1,5 +1,6 @@
 #include "gui_handler.h"
 #include "shell_tab.h"
+#include "jobs_control.h"
 #include <X11/Xlib.h>
 #include <time.h>
 
@@ -27,6 +28,8 @@ int main(void)
                 break;
             }
         }
+        /* Collect job output and notice stopped/finished jobs. */
+        jobs_poll();
         /* Close tabs that ended with "exit" or Ctrl+D; quit when none are left. */
         if (shell_tabs_cleanup() == 0)
             break;
